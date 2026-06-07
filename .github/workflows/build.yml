@@ -7,13 +7,9 @@ on:
   workflow_dispatch:
 
 jobs:
-  build:
-    name: Build on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
+  build-windows:
+    name: Build Windows
+    runs-on: windows-latest
 
     steps:
       - name: Check out repository
@@ -33,27 +29,10 @@ jobs:
       - name: Run tests
         run: python -m unittest
 
-      - name: Build macOS app
-        if: runner.os == 'macOS'
-        run: pyinstaller --clean --noconfirm --name LanDrop --windowed landrop_web.py
-
-      - name: Archive macOS app
-        if: runner.os == 'macOS'
-        run: ditto -c -k --sequesterRsrc --keepParent dist/LanDrop.app dist/LanDrop-macOS.zip
-
       - name: Build Windows executable
-        if: runner.os == 'Windows'
         run: pyinstaller --clean --noconfirm --name LanDrop --onefile --windowed landrop_web.py
 
-      - name: Upload macOS artifact
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v4
-        with:
-          name: LanDrop-macOS
-          path: dist/LanDrop-macOS.zip
-
       - name: Upload Windows artifact
-        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v4
         with:
           name: LanDrop-Windows
@@ -61,14 +40,14 @@ jobs:
 
   release:
     name: Publish latest release
-    needs: build
+    needs: build-windows
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     permissions:
       contents: write
 
     steps:
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -84,19 +63,17 @@ jobs:
           gh release create latest \
             --title "LanDrop 最新版本" \
             --notes "$(cat <<'EOF'
-          ## 下载说明
+          ## 下载
 
-          | 平台 | 文件 | 使用方式 |
+          | 平台 | 文件 | 说明 |
           |---|---|---|
-          | Windows 11 | `LanDrop.exe` | 双击直接运行，无需安装 Python |
-          | macOS | `LanDrop-macOS.zip` | 解压后双击 LanDrop.app 运行 |
+          | **Windows 11** | `LanDrop.exe` | 双击直接运行，无需安装 Python |
 
           > 每次推送到 main 分支自动构建更新。
           > Windows 首次运行时 Defender 可能提示未知来源，点击「更多信息 → 仍要运行」即可。
           EOF
           )" \
-            --prerelease \
-            "artifacts/LanDrop-macOS/LanDrop-macOS.zip" \
+            --latest \
             "artifacts/LanDrop-Windows/LanDrop.exe"
         env:
           GH_TOKEN: ${{ github.token }}
