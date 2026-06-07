@@ -1,0 +1,103 @@
+name: Build LanDrop
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build tools
+        run: python -m pip install --upgrade pip pyinstaller
+
+      - name: Compile Python files
+        run: python -m py_compile landrop.py landrop_core.py landrop_cli.py landrop_web.py test_landrop.py
+
+      - name: Run tests
+        run: python -m unittest
+
+      - name: Build macOS app
+        if: runner.os == 'macOS'
+        run: pyinstaller --clean --noconfirm --name LanDrop --windowed landrop_web.py
+
+      - name: Archive macOS app
+        if: runner.os == 'macOS'
+        run: ditto -c -k --sequesterRsrc --keepParent dist/LanDrop.app dist/LanDrop-macOS.zip
+
+      - name: Build Windows executable
+        if: runner.os == 'Windows'
+        run: pyinstaller --clean --noconfirm --name LanDrop --onefile --windowed landrop_web.py
+
+      - name: Upload macOS artifact
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: LanDrop-macOS
+          path: dist/LanDrop-macOS.zip
+
+      - name: Upload Windows artifact
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: LanDrop-Windows
+          path: dist/LanDrop.exe
+
+  release:
+    name: Publish latest release
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Delete existing latest release
+        run: gh release delete latest --yes --cleanup-tag || true
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+
+      - name: Create latest release
+        run: |
+          gh release create latest \
+            --title "LanDrop 最新版本" \
+            --notes "$(cat <<'EOF'
+          ## 下载说明
+
+          | 平台 | 文件 | 使用方式 |
+          |---|---|---|
+          | Windows 11 | `LanDrop.exe` | 双击直接运行，无需安装 Python |
+          | macOS | `LanDrop-macOS.zip` | 解压后双击 LanDrop.app 运行 |
+
+          > 每次推送到 main 分支自动构建更新。
+          > Windows 首次运行时 Defender 可能提示未知来源，点击「更多信息 → 仍要运行」即可。
+          EOF
+          )" \
+            --prerelease \
+            "artifacts/LanDrop-macOS/LanDrop-macOS.zip" \
+            "artifacts/LanDrop-Windows/LanDrop.exe"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
